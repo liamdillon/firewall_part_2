@@ -1,0 +1,12 @@
+import unittest
+import firewall
+
+class TestFirewall(unittest.TestCase):
+    
+    def setUp(self):
+        self.fw = firewall.Firewall()
+
+    def test_match(self):
+        string = "HOST: www.google.com \n"
+        regex = r'HOST:\s*(\S*)\s* \n'
+        print self.fw.match(string, regex)

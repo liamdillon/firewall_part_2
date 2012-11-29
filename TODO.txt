@@ -1,0 +1,1 @@
+A) If connection is inactive for 30 seconds should be considered closed

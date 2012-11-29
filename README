@@ -1,0 +1,19 @@
+Notes on Part 3
+
+Flow Monitoring for string search
+
+Need way to keep track of which flows are open and which ones we are monitoring 
+
+Once flow open with every data packet search for keyword search entire TCP payload
+
+Buffering packets
+Between packets need to store last one we got
+
+Length of search string could be longer than one packet
+how many packets to store = max[floor(SearchString/PacketSize), 2]
+
+Need to monitor outgoing and ingoing connection seperately
+
+Need to figure out how to append to a file and flush its cache, might need to just use close for flushing class
+
+Handle timeouts
