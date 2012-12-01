@@ -43,23 +43,25 @@ class Firewall (object):
       log.debug("in_packet_buff: " + str(self.in_packet_buffer))
     merged_ftp_packets =  self.in_packet_buffer[curr_flow]
     matched = None
-    regex_pass    = r'Entering (Passive Mode) \((.*)\)' #227
-    regex_extpass = r'Entering (Extended Passive Mode) \((.*)\)' #229
+    regex_pass    = r'227'
+    regex_extpass = r'229'
     match_pass    = re.search(regex_pass, merged_ftp_packets, re.M)
     match_extpass = re.search(regex_extpass, merged_ftp_packets, re.M)
     if match_pass is not None:
-      ftp_info = match_pass.group(2).split(',')
-      matched = match_pass.group()
-      port    = int(ftp_info[-2]) * 256 + int(ftp_info[-1])
+      reg_get_port = r'\(\d+,\d+,\d+,\d+,(\d+),(\d+)\)(.)*'
+      matched      = re.search(reg_get_port, merged_ftp_packets, re.M) 
+      port    = int(matched.group(1)) * 256 + int(matched.group(2))
+      port    = str(port)
     elif match_extpass is not None:
-      ftp_info = match_extpass.group(2).split('|')
-      matched  = match_extpass.group()
-      port     = int(ftp_info[-2])
+      reg_get_port = r'\(\|\|\|(\d+)\|\)(.)*'
+      matched  = re.search(reg_get_port, merged_ftp_packets, re.M) 
+      port     = str(matched.group(1))
     else:
       port = False
 
     if INC:
-      log.debug("port is: " + port)
+      log.debug("matched is: " + str(matched))
+      log.debug("port is: " + str(port))
     if port is not False:
       new_flow = (curr_flow[0], curr_flow[1], curr_flow[2], port)
       if INC:
@@ -68,10 +70,11 @@ class Firewall (object):
       if INC:
         log.debug("After setting open_ftp_connections: " + str(self.open_ftp_connections))
       #search and replace
-      if INC:
-        log.debug("Matched regex: " + matched)
-      rep_regex   = (r"%s" % matched)
-      replaced    = re.sub(rep_regex, '', merged_ftp_packets)
+      if match_pass is not None:
+        replaced = str(matched.group(3))
+      else:
+        replaced = str(matched.group(2))
+
       merged_ftp_packets = replaced
     #else:
     #  merged_ftp_packets = merged_ftp_packets[-(LONGEST_NOTICE):]
@@ -96,12 +99,13 @@ class Firewall (object):
     #Extended Passive Mode
     curr_flow = (str(flow.src), str(flow.srcport), str(flow.dst), str(flow.dstport))
     ftp_connection = self.open_ftp_connections.get(curr_flow, None)
-
+    if INC:
+      log.debug("curr_flow in Handle_Conn: " + str(curr_flow))
+      log.debug("open_ftp_connections: " + str(self.open_ftp_connections))
+      log.debug("is curr_flow in open_ftp_connections in Handle_Conn: " + str(ftp_connection))
 
     if flow.dstport >= 0 and flow.dstport <= MAX_COMMON_PORT+1: # port btwn 0 and 1023 inclusive
       if flow.dstport == 21:
-        if INC:
-          log.debug("Sent to Monitored")
         event.action.monitor_forward = event.action.monitor_backward = True
         curr_buff = self.in_packet_buffer.get(curr_flow, None)
         if curr_buff is None:
@@ -142,9 +146,10 @@ class Firewall (object):
     if reverse:
       self.in_packet_buffer[curr_flow] += ftp
       self.merge_search_buffer(curr_flow)
-
-    if INC:
-      log.debug("FTP: " + str(ftp))
+      event.action.forward = True
+    
+    if curr_flow in  self.open_ftp_connections:
+      event.action.forward = True
       
       
 
