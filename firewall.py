@@ -35,6 +35,16 @@ class Firewall (object):
     else:
       return 'No match found'
 
+  def cleanup(self, curr_flow):
+    data_flow =self.clean_up_connection[curr_flow]
+    if self.open_ftp_connections.get(curr_flow, False) is not False:
+      del self.open_ftp_connections[curr_flow]
+    if self.in_packet_buffer.get(data_flow, False) is not False:
+     del self.in_packet_buffer[curr_flow]
+    if self.open_ftp_connections.get(data_flow, False) is not False:
+     del self.open_ftp_connections[data_flow]
+    if self.in_packet_buffer.get(data_flow, False) is not False:
+     del self.in_packet_buffer[data_flow]
 
   def merge_search_buffer(self, curr_flow): 
     merged_ftp_packets = ''
@@ -43,11 +53,19 @@ class Firewall (object):
       log.debug("in_packet_buff: " + str(self.in_packet_buffer))
     merged_ftp_packets =  self.in_packet_buffer[curr_flow]
     matched = None
-    regex_pass    = r'227'
-    regex_extpass = r'229'
+    regex_pass    = r'227 '
+    regex_extpass = r'229 '
+    regex_end     = r'226 '
+    match_end     = re.search(regex_end, merged_ftp_packets, re.M)
     match_pass    = re.search(regex_pass, merged_ftp_packets, re.M)
     match_extpass = re.search(regex_extpass, merged_ftp_packets, re.M)
-    if match_pass is not None:
+    if match_end is not None:
+      if INC: 
+        log.debug("TERMINATING curr_flow: " + str(curr_flow))
+        log.debug("open_ftp_connections: " + str(self.open_ftp_connections))
+      self.cleanup(curr_flow)
+      return
+    elif match_pass is not None:
       reg_get_port = r'\(\d+,\d+,\d+,\d+,(\d+),(\d+)\)(.)*'
       matched      = re.search(reg_get_port, merged_ftp_packets, re.M) 
       port    = int(matched.group(1)) * 256 + int(matched.group(2))
@@ -63,11 +81,18 @@ class Firewall (object):
       log.debug("matched is: " + str(matched))
       log.debug("port is: " + str(port))
     if port is not False:
+      new_flow = (curr_flow[0],curr_flow[1],port)
+      cmd_flow = (curr_flow[0],curr_flow[1],'21')
       if INC:
+        log.debug("new_flow: " + str(new_flow))
         log.debug("About to add to open_ftp_connections: " + str(self.open_ftp_connections))
-      self.open_ftp_connections[port] = True
+        log.debug("About to add to clean_up_connection: " + str(self.clean_up_connection))
+      self.open_ftp_connections[new_flow] = True
+      self.clean_up_connection[cmd_flow] = new_flow
+      self.in_packet_buffer[new_flow]     = ''
       if INC:
         log.debug("After setting open_ftp_connections: " + str(self.open_ftp_connections))
+        log.debug("After to add to clean_up_connection: " + str(self.clean_up_connection))
       #search and replace
       if match_pass is not None:
         replaced = str(matched.group(3))
@@ -87,6 +112,7 @@ class Firewall (object):
     log.debug("Firewall initialized.")
     self.open_ftp_connections = {} # key in form of (src, srcport(or data port), dst, dstport)
     self.in_packet_buffer     = {} #key curr_flow
+    self.clean_up_connection  = {}
   def _handle_ConnectionIn (self, event, flow, packet):
     """
     New connection event handler.
@@ -96,12 +122,11 @@ class Firewall (object):
     #Active FTP
     #PAssive FTP
     #Extended Passive Mode
-    curr_flow = (str(flow.src), str(flow.srcport), str(flow.dst), str(flow.dstport))
-    dstport = curr_flow[3]
-    ftp_connection = self.open_ftp_connections.get(dstport, None)
+    curr_flow = (str(flow.src), str(flow.dst), str(flow.dstport))
+    ftp_connection = self.open_ftp_connections.get(curr_flow, None)
     if INC:
       log.debug("curr_flow in Handle_Conn: " + str(curr_flow))
-      log.debug("open_ftp_connections: " + str(self.open_ftp_connections))
+      log.debug("open_ftp_connections in Handle_Conn: " + str(self.open_ftp_connections))
       log.debug("is curr_flow in open_ftp_connections in Handle_Conn: " + str(ftp_connection))
 
     if flow.dstport >= 0 and flow.dstport <= MAX_COMMON_PORT+1: # port btwn 0 and 1023 inclusive
@@ -138,20 +163,22 @@ class Firewall (object):
         log.debug("Incoming packet is: " + str(packet))
       else:
         log.debug("Outgoing packet is: " + str(packet))
-    curr_flow = self.extract_flow(packet, reverse)
+    full_curr_flow = self.extract_flow(packet, reverse)
+    curr_flow = (full_curr_flow[0], full_curr_flow[2], full_curr_flow[3])
+    cmd_flow  = (full_curr_flow[0], full_curr_flow[2], '21')
+
     if INC:
       log.debug("curr_flow in Monitored: " + str(curr_flow))
 
     ftp = str(packet.payload.payload.payload)
-    if reverse:
-      self.in_packet_buffer[curr_flow] += ftp
-      self.merge_search_buffer(curr_flow)
-      event.action.forward = True
+    if cmd_flow in self.in_packet_buffer:
+      if reverse:
+        if INC:
+          log.debug("in_packet_buff: " + str(self.in_packet_buffer))
+        self.in_packet_buffer[curr_flow] += ftp
+        self.merge_search_buffer(curr_flow)
     
-    dstport = curr_flow[3]    
-    if dstport in  self.open_ftp_connections:
-      event.action.forward = True
-      
+       
       
 
     
