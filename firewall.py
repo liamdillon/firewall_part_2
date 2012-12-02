@@ -63,10 +63,9 @@ class Firewall (object):
       log.debug("matched is: " + str(matched))
       log.debug("port is: " + str(port))
     if port is not False:
-      new_flow = (curr_flow[0], curr_flow[1], curr_flow[2], port)
       if INC:
         log.debug("About to add to open_ftp_connections: " + str(self.open_ftp_connections))
-      self.open_ftp_connections[new_flow] = True
+      self.open_ftp_connections[port] = True
       if INC:
         log.debug("After setting open_ftp_connections: " + str(self.open_ftp_connections))
       #search and replace
@@ -98,7 +97,8 @@ class Firewall (object):
     #PAssive FTP
     #Extended Passive Mode
     curr_flow = (str(flow.src), str(flow.srcport), str(flow.dst), str(flow.dstport))
-    ftp_connection = self.open_ftp_connections.get(curr_flow, None)
+    dstport = curr_flow[3]
+    ftp_connection = self.open_ftp_connections.get(dstport, None)
     if INC:
       log.debug("curr_flow in Handle_Conn: " + str(curr_flow))
       log.debug("open_ftp_connections: " + str(self.open_ftp_connections))
@@ -148,7 +148,8 @@ class Firewall (object):
       self.merge_search_buffer(curr_flow)
       event.action.forward = True
     
-    if curr_flow in  self.open_ftp_connections:
+    dstport = curr_flow[3]    
+    if dstport in  self.open_ftp_connections:
       event.action.forward = True
       
       
