@@ -1,12 +1,14 @@
 from pox.core import core
 from pox.lib.addresses import * 
 from pox.lib.packet import *
+from pox.lib.recoco.recoco import *
 import re
 
 MAX_COMMON_PORT = 1023
 DEBUG          = False
 INC            = True
 LONGEST_NOTICE = 100 
+TIMEOUT       = 10
 
 # Get a logger
 log = core.getLogger("fw")
@@ -18,6 +20,12 @@ class Firewall (object):
   Don't change the name or anything -- the eecore component
   expects it to be firewall.Firewall.
   """
+  def timeout(self, curr_flow):
+    if DEBUG:
+      log.debug("TIMEOUT for " + str(curr_flow))
+    self.cleanup(curr_flow)
+    
+
   def extract_flow(self, packet, reverse):
     packet = str(packet)
     regex = r'[\w|\d|:]*\[([\d|\.|>]*)\]\)\{([\d|>]*)}'
@@ -36,7 +44,9 @@ class Firewall (object):
       return 'No match found'
 
   def cleanup(self, curr_flow):
-    data_flow =self.clean_up_connection[curr_flow]
+    data_flow = self.clean_up_connection.get(curr_flow, False)
+    if data_flow is not False:
+      del self.clean_up_connection[curr_flow]
     if self.open_ftp_connections.get(curr_flow, False) is not False:
       del self.open_ftp_connections[curr_flow]
     if self.in_packet_buffer.get(data_flow, False) is not False:
@@ -45,10 +55,11 @@ class Firewall (object):
      del self.open_ftp_connections[data_flow]
     if self.in_packet_buffer.get(data_flow, False) is not False:
      del self.in_packet_buffer[data_flow]
+    
 
   def merge_search_buffer(self, curr_flow): 
     merged_ftp_packets = ''
-    if INC:
+    if DEBUG:
       log.debug("curr_flow: " + str(curr_flow))
       log.debug("in_packet_buff: " + str(self.in_packet_buffer))
     merged_ftp_packets =  self.in_packet_buffer[curr_flow]
@@ -60,7 +71,7 @@ class Firewall (object):
     match_pass    = re.search(regex_pass, merged_ftp_packets, re.M)
     match_extpass = re.search(regex_extpass, merged_ftp_packets, re.M)
     if match_end is not None:
-      if INC: 
+      if DEBUG: 
         log.debug("TERMINATING curr_flow: " + str(curr_flow))
         log.debug("open_ftp_connections: " + str(self.open_ftp_connections))
       self.cleanup(curr_flow)
@@ -77,20 +88,21 @@ class Firewall (object):
     else:
       port = False
 
-    if INC:
+    if DEBUG:
       log.debug("matched is: " + str(matched))
       log.debug("port is: " + str(port))
     if port is not False:
       new_flow = (curr_flow[0],curr_flow[1],port)
       cmd_flow = (curr_flow[0],curr_flow[1],'21')
-      if INC:
+      if DEBUG:
         log.debug("new_flow: " + str(new_flow))
         log.debug("About to add to open_ftp_connections: " + str(self.open_ftp_connections))
         log.debug("About to add to clean_up_connection: " + str(self.clean_up_connection))
-      self.open_ftp_connections[new_flow] = True
+      new_timer = Timer(TIMEOUT,self.timeout,args=[curr_flow])
+      self.open_ftp_connections[new_flow] = new_timer #True
       self.clean_up_connection[cmd_flow] = new_flow
       self.in_packet_buffer[new_flow]     = ''
-      if INC:
+      if DEBUG:
         log.debug("After setting open_ftp_connections: " + str(self.open_ftp_connections))
         log.debug("After to add to clean_up_connection: " + str(self.clean_up_connection))
       #search and replace
@@ -110,7 +122,7 @@ class Firewall (object):
     Put your initialization code here.
     """
     log.debug("Firewall initialized.")
-    self.open_ftp_connections = {} # key in form of (src, srcport(or data port), dst, dstport)
+    self.open_ftp_connections = {} # key in form of (src, dst, dstport) 
     self.in_packet_buffer     = {} #key curr_flow
     self.clean_up_connection  = {}
   def _handle_ConnectionIn (self, event, flow, packet):
@@ -157,7 +169,7 @@ class Firewall (object):
     Called when data passes over the connection if monitoring
     has been enabled by a prior event handler.
     """
-    if INC:
+    if DEBUG:
       log.debug("In Monitor")
       if reverse:
         log.debug("Incoming packet is: " + str(packet))
@@ -169,17 +181,17 @@ class Firewall (object):
 
     if INC:
       log.debug("curr_flow in Monitored: " + str(curr_flow))
+      log.debug("in_packet_buffer: " + str(self.in_packet_buffer.keys()))
+      log.debug("open_ftp_connections: " + str(self.open_ftp_connections))
 
     ftp = str(packet.payload.payload.payload)
     if cmd_flow in self.in_packet_buffer:
       if reverse:
-        if INC:
+        if DEBUG:
           log.debug("in_packet_buff: " + str(self.in_packet_buffer))
         self.in_packet_buffer[curr_flow] += ftp
         self.merge_search_buffer(curr_flow)
     
        
       
-
-    
-    
+#TODO: FIGURE OUT WHERE TO UPDATE TIMEOUT
