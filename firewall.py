@@ -21,7 +21,7 @@ class Firewall (object):
   expects it to be firewall.Firewall.
   """
   def timeout(self, curr_flow):
-    if DEBUG:
+    if INC:
       log.debug("TIMEOUT for " + str(curr_flow))
     self.cleanup(curr_flow)
     
@@ -44,17 +44,19 @@ class Firewall (object):
       return 'No match found'
 
   def cleanup(self, curr_flow):
-    data_flow = self.clean_up_connection.get(curr_flow, False)
+    data_flow = self.cmd_to_data.get(curr_flow, False)
     if data_flow is not False:
-      del self.clean_up_connection[curr_flow]
+      del self.cmd_to_data[curr_flow]
     if self.open_ftp_connections.get(curr_flow, False) is not False:
+      self.open_ftp_connections[curr_flow].cancel()
       del self.open_ftp_connections[curr_flow]
     if self.in_packet_buffer.get(data_flow, False) is not False:
      del self.in_packet_buffer[curr_flow]
     if self.open_ftp_connections.get(data_flow, False) is not False:
-     del self.open_ftp_connections[data_flow]
-    if self.in_packet_buffer.get(data_flow, False) is not False:
-     del self.in_packet_buffer[data_flow]
+      self.open_ftp_connections[data_flow].cancel()
+      del self.open_ftp_connections[data_flow]      
+#    if self.in_packet_buffer.get(data_flow, False) is not False:
+#    del self.in_packet_buffer[data_flow]
     
 
   def merge_search_buffer(self, curr_flow): 
@@ -97,14 +99,14 @@ class Firewall (object):
       if DEBUG:
         log.debug("new_flow: " + str(new_flow))
         log.debug("About to add to open_ftp_connections: " + str(self.open_ftp_connections))
-        log.debug("About to add to clean_up_connection: " + str(self.clean_up_connection))
+        log.debug("About to add to cmd_to_data: " + str(self.cmd_to_data))
       new_timer = Timer(TIMEOUT,self.timeout,args=[curr_flow])
       self.open_ftp_connections[new_flow] = new_timer #True
-      self.clean_up_connection[cmd_flow] = new_flow
+      self.cmd_to_data[cmd_flow] = new_flow
       self.in_packet_buffer[new_flow]     = ''
       if DEBUG:
         log.debug("After setting open_ftp_connections: " + str(self.open_ftp_connections))
-        log.debug("After to add to clean_up_connection: " + str(self.clean_up_connection))
+        log.debug("After to add to cmd_to_data: " + str(self.cmd_to_data))
       #search and replace
       if match_pass is not None:
         replaced = str(matched.group(3))
@@ -124,7 +126,7 @@ class Firewall (object):
     log.debug("Firewall initialized.")
     self.open_ftp_connections = {} # key in form of (src, dst, dstport) 
     self.in_packet_buffer     = {} #key curr_flow
-    self.clean_up_connection  = {}
+    self.cmd_to_data  = {}
   def _handle_ConnectionIn (self, event, flow, packet):
     """
     New connection event handler.
@@ -186,12 +188,21 @@ class Firewall (object):
 
     ftp = str(packet.payload.payload.payload)
     if cmd_flow in self.in_packet_buffer:
+      #refresh timer associated with cmd_flow
+      reset_timer = Timer(TIMEOUT,self.timeout,args=[curr_flow])
+      if self.open_ftp_connections.get(curr_flow, False) is not False:
+        self.open_ftp_connections[curr_flow].cancel()
+      self.open_ftp_connections[curr_flow] = reset_timer
+      if curr_flow[2] != '21':
+        if self.open_ftp_connections.get(cmd_flow, False) is not False:
+          self.open_ftp_connections[cmd_flow].cancel()
+        self.open_ftp_connections[cmd_flow] = reset_timer
       if reverse:
         if DEBUG:
           log.debug("in_packet_buff: " + str(self.in_packet_buffer))
         self.in_packet_buffer[curr_flow] += ftp
         self.merge_search_buffer(curr_flow)
     
-       
+      
       
 #TODO: FIGURE OUT WHERE TO UPDATE TIMEOUT
