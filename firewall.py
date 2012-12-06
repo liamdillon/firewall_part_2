@@ -7,7 +7,7 @@ import re
 MAX_COMMON_PORT = 1023
 MAX_TCP_PORT    = 65535
 DEBUG           = False
-INC             = True
+INC             = False
 LONGEST_NOTICE  = 100 
 TIMEOUT         = 10
 
@@ -74,11 +74,9 @@ class Firewall (object):
     if curr_flow == cmd_flow:
       for the_data_flow in many_data_flows:
         if self.open_ftp_connections.get(the_data_flow, False) is not False:
-          log.debug(str(the_data_flow) + " has been canceled")
           self.open_ftp_connections[the_data_flow].cancel()
           del self.open_ftp_connections[the_data_flow]
       if self.open_ftp_connections.get(curr_flow, False) is not False:
-        log.debug(str(curr_flow) + " has been canceled")
         self.open_ftp_connections[curr_flow].cancel()
         del self.open_ftp_connections[cmd_flow]
       if self.in_packet_buffer.get(curr_flow, False) is not False:
