@@ -5,11 +5,10 @@ from pox.lib.recoco.recoco import *
 import re
 
 MAX_COMMON_PORT = 1023
-MAX_TCP_PORT    = 65535
-DEBUG           = False
-INC             = False
-LONGEST_NOTICE  = 100 
-TIMEOUT         = 10
+DEBUG          = False
+INC            = True
+LONGEST_NOTICE = 100 
+TIMEOUT       = 10
 
 # Get a logger
 log = core.getLogger("fw")
@@ -23,11 +22,8 @@ class Firewall (object):
   """
   def timeout(self, curr_flow):
     if INC:
-      log.debug("open_connections before cleanup: " + str(self.open_ftp_connections))
       log.debug("TIMEOUT for " + str(curr_flow))
     self.cleanup(curr_flow)
-    if INC:
-      log.debug("open_connections after cleanup: " + str(self.open_ftp_connections))
     
 
   def extract_flow(self, packet, reverse):
@@ -65,19 +61,17 @@ class Firewall (object):
 
   def merge_search_buffer(self, curr_flow): 
     merged_ftp_packets = ''
-    if INC:
-      log.debug("curr_flow in merge_search_buffer: " + str(curr_flow))
+    if DEBUG:
+      log.debug("curr_flow: " + str(curr_flow))
       log.debug("in_packet_buff: " + str(self.in_packet_buffer))
     merged_ftp_packets =  self.in_packet_buffer[curr_flow]
     matched = None
-    regex_pass    = r'(?:^227|\n227) .*\n'
-    regex_extpass = r'(?:^229|\n229) .*\n'
-    regex_end     = r'(?:^226|\n226) .*\n'
+    regex_pass    = r'227 '
+    regex_extpass = r'229 '
+    regex_end     = r'226 '
     match_end     = re.search(regex_end, merged_ftp_packets, re.M)
     match_pass    = re.search(regex_pass, merged_ftp_packets, re.M)
     match_extpass = re.search(regex_extpass, merged_ftp_packets, re.M)
-    data_ip = False
-    port = False
     if match_end is not None:
       if DEBUG: 
         log.debug("TERMINATING curr_flow: " + str(curr_flow))
@@ -85,50 +79,22 @@ class Firewall (object):
       self.cleanup(curr_flow)
       return
     elif match_pass is not None:
-      reg_get_port = r'\((\d+,\d+,\d+,\d+),(\d+),(\d+)\).*\n(.*)'
-#r'\(\d+,\d+,\d+,\d+,(\d+),(\d+)\)(.)*'
+      reg_get_port = r'\(\d+,\d+,\d+,\d+,(\d+),(\d+)\)(.)*'
       matched      = re.search(reg_get_port, merged_ftp_packets, re.M) 
-      if DEBUG:
-        log.debug("match_pass is not None.")
-        log.debug("matched.group(): " + matched.group())
-        log.debug("matched.group(1): " + matched.group(1))
-        log.debug("matched.group(2): " + matched.group(2))
-        log.debug("matched.group(3): " + matched.group(3))
-        log.debug("matched.group(4): " + matched.group(4))
-        log.debug("advertised_ip: " + re.sub(r',', '.', matched.group(1)))
-        log.debug("actual ip: " + curr_flow[1])
-      if matched is not None:
-        adv_ip    = re.sub(r',', '.', matched.group(1))
-        actual_ip = curr_flow[1]
-        port      = int(matched.group(2)) * 256 + int(matched.group(3))
-        port      = str(port)
-
-        if adv_ip != actual_ip:
-          data_ip = adv_ip
-        else:
-          data_ip = False
-      else:
-        port = False
-        data_ip = False
-
+      port    = int(matched.group(1)) * 256 + int(matched.group(2))
+      port    = str(port)
     elif match_extpass is not None:
-      reg_get_port = r'\(\|\|\|(\d+)\|\).*\n(.*)'
+      reg_get_port = r'\(\|\|\|(\d+)\|\)(.)*'
       matched  = re.search(reg_get_port, merged_ftp_packets, re.M) 
-      if matched is not None:
-        port     = str(matched.group(1))
+      port     = str(matched.group(1))
     else:
       port = False
-      data_ip = False
 
     if DEBUG:
       log.debug("matched is: " + str(matched))
       log.debug("port is: " + str(port))
-    if port is not False and int(port) <= MAX_TCP_PORT:
-      if data_ip:
-        new_flow = (curr_flow[0],data_ip,port)
-      else:
-        new_flow = (curr_flow[0],curr_flow[1],port)
-      
+    if port is not False:
+      new_flow = (curr_flow[0],curr_flow[1],port)
       cmd_flow = (curr_flow[0],curr_flow[1],'21')
       if DEBUG:
         log.debug("new_flow: " + str(new_flow))
@@ -143,14 +109,11 @@ class Firewall (object):
         log.debug("After to add to cmd_to_data: " + str(self.cmd_to_data))
       #search and replace
       if match_pass is not None:
-        replaced = str(matched.group(4)) #changed from 3
+        replaced = str(matched.group(3))
       else:
-        replaced = str(matched.group(2)) #changed from 2
-      if DEBUG:
-        log.debug("merged_ftp_packets before replacement: " + merged_ftp_packets)
+        replaced = str(matched.group(2))
+
       merged_ftp_packets = replaced
-      if DEBUG:
-        log.debug("merged_ftp_packets after replacement: " + merged_ftp_packets)
     #else:
     #  merged_ftp_packets = merged_ftp_packets[-(LONGEST_NOTICE):]
     self.in_packet_buffer[curr_flow] = merged_ftp_packets    
@@ -175,12 +138,12 @@ class Firewall (object):
     #Extended Passive Mode
     curr_flow = (str(flow.src), str(flow.dst), str(flow.dstport))
     ftp_connection = self.open_ftp_connections.get(curr_flow, None)
-    if DEBUG:
+    if INC:
       log.debug("curr_flow in Handle_Conn: " + str(curr_flow))
       log.debug("open_ftp_connections in Handle_Conn: " + str(self.open_ftp_connections))
       log.debug("is curr_flow in open_ftp_connections in Handle_Conn: " + str(ftp_connection))
 
-    if flow.dstport >= 0 and flow.dstport <= MAX_COMMON_PORT: # port btwn 0 and 1023 inclusive
+    if flow.dstport >= 0 and flow.dstport <= MAX_COMMON_PORT+1: # port btwn 0 and 1023 inclusive
       if flow.dstport == 21:
         event.action.monitor_forward = event.action.monitor_backward = True
         curr_buff = self.in_packet_buffer.get(curr_flow, None)
@@ -218,7 +181,7 @@ class Firewall (object):
     curr_flow = (full_curr_flow[0], full_curr_flow[2], full_curr_flow[3])
     cmd_flow  = (full_curr_flow[0], full_curr_flow[2], '21')
 
-    if DEBUG:
+    if INC:
       log.debug("curr_flow in Monitored: " + str(curr_flow))
       log.debug("in_packet_buffer: " + str(self.in_packet_buffer.keys()))
       log.debug("open_ftp_connections: " + str(self.open_ftp_connections))
