@@ -21,13 +21,6 @@ class Firewall (object):
   Don't change the name or anything -- the eecore component
   expects it to be firewall.Firewall.
   """
-  def timeout(self, curr_flow):
-    if INC:
-      log.debug("open_connections before cleanup: " + str(self.open_ftp_connections))
-      log.debug("TIMEOUT for " + str(curr_flow))
-    self.cleanup(curr_flow)
-    if INC:
-      log.debug("open_connections after cleanup: " + str(self.open_ftp_connections))
     
 
   def extract_flow(self, packet, reverse):
@@ -55,33 +48,64 @@ class Firewall (object):
         new_flow = (curr_flow[0],curr_flow[1],port)
       
       cmd_flow = (curr_flow[0],curr_flow[1],'21')
-      new_timer = Timer(TIMEOUT,self.timeout,args=[curr_flow])
+  
+      new_timer = Timer(TIMEOUT,self.timeout,args=[curr_flow, cmd_flow])
+      if self.open_ftp_connections.get(new_flow, False) is not False:
+        self.open_ftp_connections[new_flow].cancel()
       self.open_ftp_connections[new_flow] = new_timer #True
-      self.cmd_to_data[cmd_flow] = new_flow
+      if new_flow != cmd_flow:
+        if self.cmd_to_data.get(cmd_flow, False) is not False:
+          many_data_flows = self.cmd_to_data[cmd_flow]
+          if new_flow not in many_data_flows:
+            self.cmd_to_data[cmd_flow].append(new_flow)
+        else:
+          self.cmd_to_data[cmd_flow] = [new_flow]
       self.in_packet_buffer[new_flow]     = ''
 
 
+  def timeout(self, curr_flow, cmd_flow):
+    if INC:
+      log.debug("TIMEOUT for " + str(curr_flow))
+      log.debug("open_connections before timeout: " + str(self.open_ftp_connections.keys()))
+      log.debug("cmd_to_data before timeout: " + str(self.cmd_to_data))
+
+    data_flow = False
+    many_data_flows = self.cmd_to_data.get(cmd_flow, [])
+    if curr_flow == cmd_flow:
+      for the_data_flow in many_data_flows:
+        if self.open_ftp_connections.get(the_data_flow, False) is not False:
+          log.debug(str(the_data_flow) + " has been canceled")
+          self.open_ftp_connections[the_data_flow].cancel()
+          del self.open_ftp_connections[the_data_flow]
+      if self.open_ftp_connections.get(curr_flow, False) is not False:
+        log.debug(str(curr_flow) + " has been canceled")
+        self.open_ftp_connections[curr_flow].cancel()
+        del self.open_ftp_connections[cmd_flow]
+      if self.in_packet_buffer.get(curr_flow, False) is not False:
+        del self.in_packet_buffer[curr_flow]
+      if self.cmd_to_data.get(cmd_flow, False) is not False:
+        del self.cmd_to_data[cmd_flow]
+    else:
+      if curr_flow in many_data_flows:
+        data_flow = curr_flow
+      if data_flow is not False:
+        self.cmd_to_data[cmd_flow].remove(data_flow)
+        if self.open_ftp_connections.get(data_flow, False) is not False:
+          self.open_ftp_connections[data_flow].cancel()
+          del self.open_ftp_connections[data_flow]      
+        if self.open_ftp_connections.get(data_flow, False) is not False:
+          self.open_ftp_connections[data_flow].cancel()
+          del self.open_ftp_connections[data_flow]
+        if self.in_packet_buffer.get(data_flow, False) is not False:
+          del self.in_packet_buffer[data_flow]
+        if self.cmd_to_data.get(data_flow, False) is not False:
+          del self.cmd_to_data[data_flow]
+
+    if INC:
+      log.debug("open_connections after cleanup: " + str(self.open_ftp_connections.keys()))
+      log.debug("cmd_to_data after timeout: " + str(self.cmd_to_data))
 
 
-  def cleanup(self, curr_flow):
-    data_flow = self.cmd_to_data.get(curr_flow, False)
-    if data_flow is not False:
-      del self.cmd_to_data[curr_flow]
-      if self.open_ftp_connections.get(data_flow, False) is not False:
-        self.open_ftp_connections[data_flow].cancel()
-        del self.open_ftp_connections[data_flow]      
-    if self.open_ftp_connections.get(curr_flow, False) is not False:
-      self.open_ftp_connections[curr_flow].cancel()
-      del self.open_ftp_connections[curr_flow]
-    if self.in_packet_buffer.get(curr_flow, False) is not False:
-      del self.in_packet_buffer[curr_flow]
-
-
-
-#    if self.in_packet_buffer.get(data_flow, False) is not False:
-#    del self.in_packet_buffer[data_flow]
-  
-    
   def merge_search_buffer(self, curr_flow): 
     merged_ftp_packets = ''
     merged_ftp_packets =  self.in_packet_buffer[curr_flow]
@@ -204,7 +228,7 @@ class Firewall (object):
     ftp = str(packet.payload.payload.payload)
     if cmd_flow in self.in_packet_buffer:
       #refresh timer associated with cmd_flow
-      reset_timer = Timer(TIMEOUT,self.timeout,args=[curr_flow])
+      reset_timer = Timer(TIMEOUT,self.timeout,args=[curr_flow, cmd_flow])
       if self.open_ftp_connections.get(curr_flow, False) is not False:
         self.open_ftp_connections[curr_flow].cancel()
       self.open_ftp_connections[curr_flow] = reset_timer
