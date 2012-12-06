@@ -47,6 +47,22 @@ class Firewall (object):
     else:
       return 'No match found'
 
+  def open_data_connection(self, curr_flow, data_ip, port):
+    if port is not False and int(port) <= MAX_TCP_PORT:
+      if data_ip:
+        new_flow = (curr_flow[0],data_ip,port)
+      else:
+        new_flow = (curr_flow[0],curr_flow[1],port)
+      
+      cmd_flow = (curr_flow[0],curr_flow[1],'21')
+      new_timer = Timer(TIMEOUT,self.timeout,args=[curr_flow])
+      self.open_ftp_connections[new_flow] = new_timer #True
+      self.cmd_to_data[cmd_flow] = new_flow
+      self.in_packet_buffer[new_flow]     = ''
+
+
+
+
   def cleanup(self, curr_flow):
     data_flow = self.cmd_to_data.get(curr_flow, False)
     if data_flow is not False:
@@ -64,73 +80,53 @@ class Firewall (object):
 
 #    if self.in_packet_buffer.get(data_flow, False) is not False:
 #    del self.in_packet_buffer[data_flow]
+  
     
   def merge_search_buffer(self, curr_flow): 
     merged_ftp_packets = ''
     merged_ftp_packets =  self.in_packet_buffer[curr_flow]
-    matched = None
+    matched_on_pass = matched_on_extpass = None
     regex_pass    = r'(?:^227|\n227) .*\n'
     regex_extpass = r'(?:^229|\n229) .*\n'
     match_pass    = re.search(regex_pass, merged_ftp_packets, re.M)
     match_extpass = re.search(regex_extpass, merged_ftp_packets, re.M)
-    data_ip = False
-    port = False
+    data_ip = False #only used for pass not extpass
+    port_pass = port_extpass = False
     if match_pass is not None:
       reg_get_port = r'\((\d+,\d+,\d+,\d+),(\d+),(\d+)\).*\n(.*)'
 #r'\(\d+,\d+,\d+,\d+,(\d+),(\d+)\)(.)*'
-      matched      = re.search(reg_get_port, merged_ftp_packets, re.M) 
-      if matched is not None:
-        adv_ip    = re.sub(r',', '.', matched.group(1))
+      matched_on_pass      = re.search(reg_get_port, merged_ftp_packets, re.M) 
+      if matched_on_pass is not None:
+        adv_ip    = re.sub(r',', '.', matched_on_pass.group(1))
         actual_ip = curr_flow[1]
-        port      = int(matched.group(2)) * 256 + int(matched.group(3))
-        port      = str(port)
-
+        port_pass      = int(matched_on_pass.group(2)) * 256 + int(matched_on_pass.group(3))
+        port_pass      = str(port_pass)
         if adv_ip != actual_ip:
           data_ip = adv_ip
-        else:
-          data_ip = False
-      else:
-        port = False
-        data_ip = False
-
-    elif match_extpass is not None:
+        self.open_data_connection(curr_flow, data_ip, port_pass)
+    if match_extpass is not None:
       reg_get_port = r'\(\|\|\|(\d+)\|\).*\n(.*)'
-      matched  = re.search(reg_get_port, merged_ftp_packets, re.M) 
-      if matched is not None:
-        port     = str(matched.group(1))
-    else:
-      port = False
-      data_ip = False
+      matched_on_extpass  = re.search(reg_get_port, merged_ftp_packets, re.M) 
+      if matched_on_extpass is not None:
+        port_extpass  = str(matched_on_extpass.group(1))
+        self.open_data_connection(curr_flow, False, port_extpass) #data_ip = False
 
-    if DEBUG:
-      log.debug("matched is: " + str(matched))
-      log.debug("port is: " + str(port))
-    if port is not False and int(port) <= MAX_TCP_PORT:
-      if data_ip:
-        new_flow = (curr_flow[0],data_ip,port)
-      else:
-        new_flow = (curr_flow[0],curr_flow[1],port)
-      
-      cmd_flow = (curr_flow[0],curr_flow[1],'21')
-      if DEBUG:
-        log.debug("new_flow: " + str(new_flow))
-        log.debug("About to add to open_ftp_connections: " + str(self.open_ftp_connections))
-        log.debug("About to add to cmd_to_data: " + str(self.cmd_to_data))
-      new_timer = Timer(TIMEOUT,self.timeout,args=[curr_flow])
-      self.open_ftp_connections[new_flow] = new_timer #True
-      self.cmd_to_data[cmd_flow] = new_flow
-      self.in_packet_buffer[new_flow]     = ''
-      if DEBUG:
-        log.debug("After setting open_ftp_connections: " + str(self.open_ftp_connections))
-        log.debug("After to add to cmd_to_data: " + str(self.cmd_to_data))
       #search and replace
+      replaced = False
+      replaced_pass = replaced_extpass = None
       if match_pass is not None:
-        replaced = str(matched.group(4)) #changed from 3
-      else:
-        replaced = str(matched.group(2)) #changed from 2
-      if DEBUG:
-        log.debug("merged_ftp_packets before replacement: " + merged_ftp_packets)
-      merged_ftp_packets = replaced
+        replaced_pass = str(matched_on_pass.group(4)) #changed from 3
+        replaced = replaced_pass
+      if match_extpass is not None:
+        replaced_extpass = str(matched_on_extpass.group(2)) #changed from 2
+        replaced = replaced_extpass
+      if match_pass is not None and match_extpass is not None:
+        if len(replaced_pass) < len(replaced_extpass):
+          replaced = replaced_pass
+        else:
+          replaced = replaced_extpass
+      if replaced is not False:
+        merged_ftp_packets = replaced
       if DEBUG:
         log.debug("merged_ftp_packets after replacement: " + merged_ftp_packets)
     #else:
